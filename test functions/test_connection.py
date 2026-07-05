@@ -1,3 +1,5 @@
+#connect and recieve heartbeat
+
 from pymavlink import mavutil
 
 print("Connecting...")

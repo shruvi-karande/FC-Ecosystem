@@ -48,18 +48,7 @@ def disconnect():
 
 
 def set_mode(mode):
-    """
-    Change flight mode.
-    Example:
-        set_mode("GUIDED")
-        set_mode("RTL")
-        set_mode("LOITER")
-    """
-
     global master
-
-    if master is None:
-        raise Exception("Drone not connected!")
 
     mode = mode.upper()
 
@@ -68,17 +57,16 @@ def set_mode(mode):
 
     mode_id = master.mode_mapping()[mode]
 
-    master.mav.set_mode_send(
-        master.target_system,
-        mavutil.mavlink.MAV_MODE_FLAG_CUSTOM_MODE_ENABLED,
-        mode_id
-    )
+    master.set_mode(mode_id)
 
     print(f"Changing mode to {mode}...")
 
-    time.sleep(2)
+    while True:
+        master.recv_match(type="HEARTBEAT", blocking=True)
+        if master.flightmode == mode:
+            break
 
-    print("Current Mode:", master.flightmode)
+    print(f"Mode changed to {master.flightmode}")
 
 
 def arm():
@@ -123,10 +111,6 @@ def disarm():
 
 
 def takeoff(altitude):
-    """
-    Take off to the specified altitude.
-    """
-
     global master
 
     if master is None:
@@ -142,16 +126,19 @@ def takeoff(altitude):
         master.target_component,
         mavutil.mavlink.MAV_CMD_NAV_TAKEOFF,
         0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
+        0, 0, 0, 0,
+        0, 0,
         altitude
     )
 
-    print("Takeoff command sent.")
+    ack = master.recv_match(type="COMMAND_ACK", blocking=True, timeout=5)
+
+    if ack:
+        print(f"ACK received:")
+        print(f"Command: {ack.command}")
+        print(f"Result : {ack.result}")
+    else:
+        print("No ACK received.")
 
 
 def land():
