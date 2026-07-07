@@ -1,6 +1,4 @@
 from pymavlink import mavutil
-import time
-
 
 master = None
 
@@ -8,65 +6,58 @@ master = None
 def connect(connection_string="udp:0.0.0.0:14550"):
     """
     Connect to the drone and wait for a heartbeat.
+
+    Returns:
+        True  -> Connection successful
+        False -> Connection failed
     """
 
     global master
 
     if master is not None:
         print("Already connected.")
-        return master
+        return True
 
-    print(f"Connecting to {connection_string}...")
+    try:
+        print(f"Connecting to {connection_string}...")
 
-    master = mavutil.mavlink_connection(connection_string)
+        master = mavutil.mavlink_connection(connection_string)
 
-    print("Waiting for heartbeat...")
-    master.wait_heartbeat()
+        print("Waiting for heartbeat...")
+        master.wait_heartbeat(timeout=10)
 
-    print("Connected Successfully!")
-    print(f"System ID: {master.target_system}")
-    print(f"Component ID: {master.target_component}")
+        print("Heartbeat received!")
+        print("Drone connected successfully.")
 
-    return master
+        return True
+
+    except Exception as e:
+        print(f"Connection failed: {e}")
+        master = None
+        return False
 
 
 def disconnect():
     """
-    Close the MAVLink connection.
+    Disconnect from the drone.
     """
 
     global master
 
     if master is None:
         print("No active connection.")
-        return
+        return False
 
-    master.close()
-    master = None
+    try:
+        master.close()
+        master = None
 
-    print("Disconnected.")
+        print("Disconnected.")
+        return True
 
-
-def set_mode(mode):
-    global master
-
-    mode = mode.upper()
-
-    if mode not in master.mode_mapping():
-        raise Exception(f"{mode} mode not supported.")
-
-    mode_id = master.mode_mapping()[mode]
-
-    master.set_mode(mode_id)
-
-    print(f"Changing mode to {mode}...")
-
-    while True:
-        master.recv_match(type="HEARTBEAT", blocking=True)
-        if master.flightmode == mode:
-            break
-
-    print(f"Mode changed to {master.flightmode}")
+    except Exception as e:
+        print(f"Disconnect failed: {e}")
+        return False
 
 
 def arm():
@@ -77,18 +68,23 @@ def arm():
     global master
 
     if master is None:
-        raise Exception("Drone not connected!")
+        print("Drone not connected.")
+        return False
 
-    if master.flightmode != "GUIDED":
-        set_mode("GUIDED")
+    try:
+        print("Arming drone...")
 
-    print("Arming Drone...")
+        master.arducopter_arm()
 
-    master.arducopter_arm()
+        master.motors_armed_wait()
 
-    master.motors_armed_wait()
+        print("Drone armed successfully.")
 
-    print("Drone Armed Successfully!")
+        return True
+
+    except Exception as e:
+        print(f"Failed to arm: {e}")
+        return False
 
 
 def disarm():
@@ -99,129 +95,206 @@ def disarm():
     global master
 
     if master is None:
-        raise Exception("Drone not connected!")
+        print("Drone not connected.")
+        return False
 
-    print("Disarming Drone...")
+    try:
+        print("Disarming drone...")
 
-    master.arducopter_disarm()
+        master.arducopter_disarm()
 
-    master.motors_disarmed_wait()
+        master.motors_disarmed_wait()
 
-    print("Drone Disarmed Successfully!")
+        print("Drone disarmed successfully.")
 
+        return True
 
-def takeoff(altitude):
-    global master
-
-    if master is None:
-        raise Exception("Drone not connected!")
-
-    if not master.motors_armed():
-        arm()
-
-    print(f"Taking off to {altitude} m...")
-
-    master.mav.command_long_send(
-        master.target_system,
-        master.target_component,
-        mavutil.mavlink.MAV_CMD_NAV_TAKEOFF,
-        0,
-        0, 0, 0, 0,
-        0, 0,
-        altitude
-    )
-
-    ack = master.recv_match(type="COMMAND_ACK", blocking=True, timeout=5)
-
-    if ack:
-        print(f"ACK received:")
-        print(f"Command: {ack.command}")
-        print(f"Result : {ack.result}")
-    else:
-        print("No ACK received.")
-
-
-def land():
-    """
-    Land the drone.
-    """
-
-    global master
-
-    if master is None:
-        raise Exception("Drone not connected!")
-
-    print("Landing...")
-
-    master.mav.command_long_send(
-        master.target_system,
-        master.target_component,
-        mavutil.mavlink.MAV_CMD_NAV_LAND,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0
-    )
-
-    print("Land command sent.")
-
-
-def rtl():
-    """
-    Return to Launch.
-    """
-
-    global master
-
-    if master is None:
-        raise Exception("Drone not connected!")
-
-    print("Returning to Launch...")
-
-    master.mav.command_long_send(
-        master.target_system,
-        master.target_component,
-        mavutil.mavlink.MAV_CMD_NAV_RETURN_TO_LAUNCH,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0
-    )
-
-    print("RTL command sent.")
+    except Exception as e:
+        print(f"Failed to disarm: {e}")
+        return False
 
 
 def get_status():
     """
-    Return current drone status as a dictionary.
+    Get overall drone status.
     """
 
     global master
 
     if master is None:
-        raise Exception("Drone not connected!")
+        return None
 
-    gps = master.recv_match(
-        type="GLOBAL_POSITION_INT",
-        blocking=True
-    )
+    try:
 
-    status = {
-        "connected": True,
-        "armed": master.motors_armed(),
-        "mode": master.flightmode,
-        "latitude": gps.lat / 1e7,
-        "longitude": gps.lon / 1e7,
-        "relative_altitude": gps.relative_alt / 1000,
-        "absolute_altitude": gps.alt / 1000
-    }
+        gps = master.recv_match(
+            type="GLOBAL_POSITION_INT",
+            blocking=True,
+            timeout=2
+        )
 
-    return status
+        if gps is None:
+            return None
+
+        return {
+            "connected": True,
+            "armed": master.motors_armed(),
+            "mode": master.flightmode,
+            "latitude": gps.lat / 1e7,
+            "longitude": gps.lon / 1e7,
+            "relative_altitude": gps.relative_alt / 1000,
+            "absolute_altitude": gps.alt / 1000
+        }
+
+    except Exception as e:
+        print(f"Status error: {e}")
+        return None
+
+
+def get_gps():
+    """
+    Get GPS coordinates.
+    """
+
+    global master
+
+    if master is None:
+        return None
+
+    try:
+
+        gps = master.recv_match(
+            type="GLOBAL_POSITION_INT",
+            blocking=True,
+            timeout=2
+        )
+
+        if gps is None:
+            return None
+
+        return {
+            "latitude": gps.lat / 1e7,
+            "longitude": gps.lon / 1e7
+        }
+
+    except Exception as e:
+        print(f"GPS error: {e}")
+        return None
+
+
+def get_battery():
+    """
+    Get battery information.
+    """
+
+    global master
+
+    if master is None:
+        return None
+
+    try:
+
+        battery = master.recv_match(
+            type="SYS_STATUS",
+            blocking=True,
+            timeout=2
+        )
+
+        if battery is None:
+            return None
+
+        return {
+            "battery_remaining": battery.battery_remaining,
+            "voltage": battery.voltage_battery / 1000
+        }
+
+    except Exception as e:
+        print(f"Battery error: {e}")
+        return None
+
+
+def get_attitude():
+    """
+    Get roll, pitch and yaw.
+    """
+
+    global master
+
+    if master is None:
+        return None
+
+    try:
+
+        attitude = master.recv_match(
+            type="ATTITUDE",
+            blocking=True,
+            timeout=2
+        )
+
+        if attitude is None:
+            return None
+
+        return {
+            "roll": attitude.roll,
+            "pitch": attitude.pitch,
+            "yaw": attitude.yaw
+        }
+
+    except Exception as e:
+        print(f"Attitude error: {e}")
+        return None
+
+
+def get_altitude():
+    """
+    Get altitude.
+    """
+
+    global master
+
+    if master is None:
+        return None
+
+    try:
+
+        gps = master.recv_match(
+            type="GLOBAL_POSITION_INT",
+            blocking=True,
+            timeout=2
+        )
+
+        if gps is None:
+            return None
+
+        return {
+            "relative_altitude": gps.relative_alt / 1000,
+            "absolute_altitude": gps.alt / 1000
+        }
+
+    except Exception as e:
+        print(f"Altitude error: {e}")
+        return None
+
+
+
+if __name__ == "__main__":
+
+    if connect():
+
+        print("\n===== STATUS =====")
+        print(get_status())
+
+        print("\n===== GPS =====")
+        print(get_gps())
+
+        print("\n===== BATTERY =====")
+        print(get_battery())
+
+        print("\n===== ATTITUDE =====")
+        print(get_attitude())
+
+        print("\n===== ALTITUDE =====")
+        print(get_altitude())
+
+        disarm()
+
+        disconnect()
