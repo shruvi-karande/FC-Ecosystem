@@ -134,7 +134,7 @@ def get_status():
 
         if gps is None:
             return None
-
+print(master.flightmode)
         return {
             "connected": True,
             "armed": master.motors_armed(),
