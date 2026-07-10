@@ -114,6 +114,7 @@ def disarm():
         return False
 
 
+
 def get_status():
     """
     Get overall drone status.
